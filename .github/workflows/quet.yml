@@ -1,0 +1,45 @@
+name: Nhịp quét tin bot
+
+# Gọi noibo /api/bot-tra-loi/quet mỗi 30 giây, 24/7, để bot tự trả lời khách Pancake.
+# Mỗi lượt chạy ~5h40' rồi tự gọi lượt sau; lịch 30 phút/lần chỉ là lưới an toàn nếu chuỗi đứt.
+# Log repo công khai nên CHỈ in số lượng, không in mã hội thoại/tên khách.
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "*/30 * * * *"
+
+concurrency:
+  group: quet
+  cancel-in-progress: false
+
+permissions:
+  actions: write
+
+jobs:
+  quet:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: Quét mỗi 30 giây
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          QUET_KEY: ${{ secrets.QUET_KEY }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$QUET_KEY" ]; then echo "Thieu secret"; exit 1; fi
+          HET=$((SECONDS + 340*60)); N=0; LOI=0
+          while [ $SECONDS -lt $HET ]; do
+            T0=$SECONDS; N=$((N+1))
+            code=$(curl -sS -o r.json -w "%{http_code}" --max-time 58 -H "x-key: $QUET_KEY" "${APP_URL%/}/api/bot-tra-loi/quet" || echo 000)
+            if [ "$code" != "200" ]; then LOI=$((LOI+1)); echo "$(date -u +%H:%M:%S) luot $N: HTTP $code"
+            else
+              X=$(python3 -c "import json;print(json.load(open('r.json')).get('xet',0))" 2>/dev/null || echo "?")
+              [ "$X" != "0" ] && echo "$(date -u +%H:%M:%S) luot $N: xet $X hoi thoai"
+            fi
+            CON=$((30 - (SECONDS - T0))); [ $CON -gt 0 ] && sleep $CON
+          done
+          echo "Xong: $N luot, $LOI luot loi"
+      - name: Nối lượt sau
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run quet.yml --repo "$GITHUB_REPOSITORY"
