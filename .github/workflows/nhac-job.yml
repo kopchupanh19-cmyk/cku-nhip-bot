@@ -1,0 +1,30 @@
+name: Nhịp nhắc job
+
+# Gọi noibo /api/cron/nhac-job mỗi 10 phút: kịp mốc nhắc có mặt 12h + 1h (Vercel Hobby chỉ chạy cron 4 lần/ngày)
+# và giữ máy chủ + cơ sở dữ liệu luôn thức (đỡ lần bấm đầu chờ 1–3 giây).
+# Mỗi mốc chỉ gửi 1 lần/người/job (máy chủ chống trùng). Log repo công khai nên CHỈ in số tin đã gửi.
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "*/10 * * * *"
+
+concurrency:
+  group: nhac-job
+  cancel-in-progress: false
+
+jobs:
+  nhac:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Gọi nhắc job
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          QUET_KEY: ${{ secrets.QUET_KEY }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$QUET_KEY" ]; then echo "Thieu secret"; exit 1; fi
+          code=$(curl -sS -o r.json -w "%{http_code}" --max-time 60 -H "x-key: $QUET_KEY" "${APP_URL%/}/api/cron/nhac-job" || echo 000)
+          G=$(python3 -c "import json;print(json.load(open('r.json')).get('gui','?'))" 2>/dev/null || echo "?")
+          echo "HTTP $code - da gui $G tin"
+          rm -f r.json
+          [ "$code" = "200" ]
